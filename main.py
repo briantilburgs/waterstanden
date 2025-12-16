@@ -231,21 +231,15 @@ def plot_waterstanden(data: dict, title="Waterstanden"):
 
 def main():
     waterstanden = []
-    water_data = {}
     for label, code in LOCATIONS.items():
         print("\n" + "=" * 60)
         print(f"Locatie: {label} ({code})")
         print("=" * 60)
 
-        result = check_waterstand(label, code, "meting", 14)
-        if isinstance(result, list):
-            waterstanden.extend(result)
-
-        result = check_waterstand(label, code, "verwachting", 14)
-        #result = check_watervoorspelling(label, code)
-        if isinstance(result, list):
-            waterstanden.extend(result)
-
+        for t in ("meting", "verwachting"):
+            r = check_waterstand(label, code, t, 14)
+            if isinstance(r, list):
+                waterstanden.extend(r)
 
     with open("waterstanden.json", "w", encoding="utf-8") as f:
         json.dump(waterstanden, f, indent=2, ensure_ascii=False)
