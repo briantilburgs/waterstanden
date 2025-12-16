@@ -50,14 +50,19 @@ def post_json(url: str, payload: dict) -> dict:
         )
 
 
-def check_waterstand(label: str, location_code: str):
+def check_waterstand(label: str, location_code: str, type_data: str, days: int):
     # Waterinfo publiek: ~28 dagen terug, ~2 dagen vooruit.
     # Voor een simpele beschikbaarheidscheck: neem laatste 2 dagen.
-
+    # type data == "meting", "verwachting",
     now = datetime.now(TZ)
-    start = now - timedelta(days=14)
-    end   = now
-
+    if type_data == "meting":
+        start = now - timedelta(days=days)
+        end   = now
+    elif type_data == "verwachting":
+        start = now
+        end   = now + timedelta(days=days)
+    else:
+        return {}
     # 1) CheckWaarnemingenAanwezig (DD-API20 format) alleen kort:
     # Expecting:
     # {
@@ -86,7 +91,6 @@ def check_waterstand(label: str, location_code: str):
         print(f"❌ Geen waterstand beschikbaar (WATHTE) voor {label} in de afgelopen 2 dagen")
         print("   CheckWaarnemingenAanwezig response:")
         print(json.dumps(check_resp, indent=2, ensure_ascii=False))
-        return
 
     print(f"✅ Waterstand lijkt beschikbaar voor {label} (CheckWaarnemingenAanwezig=true). Haal laatste waarde op...")
 
@@ -97,7 +101,7 @@ def check_waterstand(label: str, location_code: str):
             "AquoMetadata": {
                 "Compartiment": {"Code": "OW"},
                 "Grootheid": {"Code": "WATHTE"},
-                "ProcesType": "meting",
+                "ProcesType": f"{type_data}",
             }
         },
         "Periode": {
@@ -116,7 +120,7 @@ def check_waterstand(label: str, location_code: str):
     # Neem de eerste lijst, en pak de laatste waarneming (meestal gesorteerd op tijd)
     waarn = (wlists[0].get("MetingenLijst") or [])
     if not waarn:
-        print("⚠️ WaarnemingenLijst aanwezig, maar leeg.")
+        print("⚠️ MetingenLijst aanwezig, maar leeg.")
         print(json.dumps(wlists[0], indent=2, ensure_ascii=False)[:100])
         return
 
@@ -164,7 +168,6 @@ def check_watervoorspelling(label: str, location_code: str):
         print(f"❌ Geen waterstand beschikbaar (WATHTE) voor {label} in de afgelopen 2 dagen")
         print("   CheckWaarnemingenAanwezig response:")
         print(json.dumps(check_resp, indent=2, ensure_ascii=False))
-        return
 
     print(f"✅ Waterstand lijkt beschikbaar voor {label} (CheckWaarnemingenAanwezig=true). Haal laatste waarde op...")
 
@@ -185,11 +188,7 @@ def check_watervoorspelling(label: str, location_code: str):
     }
 
     obs_resp = post_json(URL_OBS, obs_payload)
-    with open("testdata3.json", "w", encoding="utf-8") as f:
-        json.dump(obs_resp, f, indent=2, ensure_ascii=False)
 
-    for item in obs_resp:
-        print(f"DEZZZZEEE {item}")
     wlists = obs_resp.get("WaarnemingenLijst", []) or []
     if not wlists:
         print("⚠️ Check zei dat er data is, maar OphalenWaarnemingen gaf geen WaarnemingenLijst terug.")
@@ -316,11 +315,12 @@ def main():
         print(f"Locatie: {label} ({code})")
         print("=" * 60)
 
-        result = check_waterstand(label, code)
+        result = check_waterstand(label, code, "meting", 14)
         if isinstance(result, list):
             waterstanden.extend(result)
 
-        result = check_watervoorspelling(label, code)
+        result = check_waterstand(label, code, "verwachting", 14)
+        #result = check_watervoorspelling(label, code)
         if isinstance(result, list):
             waterstanden.extend(result)
 
