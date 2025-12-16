@@ -209,6 +209,18 @@ def plot_waterstanden(data: dict, title="Waterstanden"):
     locations = [k for k in data.keys() if k != "index"]
 
     plt.figure(figsize=(14, 10))
+    # Create Grapfh layout
+    ax = plt.gca()
+    # Major ticks: elke dag om 00:00
+    ax.xaxis.set_major_locator(mdates.DayLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+    # Minor ticks: elke 6 uur
+    ax.xaxis.set_minor_locator(mdates.HourLocator(interval=6))
+    # Rasterlijnen
+    ax.grid(which="major", linewidth=1.2)  # dikker (00:00)
+    ax.grid(which="minor", linewidth=0.4)  # dunner (6 uur)
+
+
     for loc in locations:
         y = [data.get(loc, {}).get(t, None) for t in times]
         plt.plot(x, y, marker=".", markersize=3, linewidth=1, label=loc)
@@ -242,7 +254,7 @@ def main():
         json.dump(waterstanden, f, indent=2, ensure_ascii=False)
 
     printable_dict = print_data(waterstanden)
-    print_table(printable_dict)
+    # print_table(printable_dict)
     plot_waterstanden(printable_dict)
 
 if __name__ == "__main__":
