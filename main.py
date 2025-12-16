@@ -138,8 +138,6 @@ def print_data(water_data):
     print_dict={'index':{}}
     for loc_data in water_data:
         locatie = loc_data['Locatie']['Naam'].split(" ")[0].split(",")[0]
-        #if locatie not in print_dict:
-        #    print_dict[locatie] = {}
         print_dict.setdefault(locatie, {})
         print(f"starting measurements for {locatie}")
 
@@ -149,7 +147,6 @@ def print_data(water_data):
                 print_dict['index'][timestamp] = {}
                 print_dict[locatie][timestamp] = meting["Meetwaarde"]["Waarde_Numeriek"]
 
-    print(print_dict)
     return print_dict
 
 def print_table(data: dict):
