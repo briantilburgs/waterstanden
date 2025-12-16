@@ -22,17 +22,21 @@ def iso(dt: datetime) -> str:
 
 def post_json(url: str, payload: dict) -> dict:
     r = requests.post(url, json=payload, timeout=20)
-
+    print(f"Getting data from {url}")
     # 204 No Content = valid request, but no matching data
     if r.status_code == 204:
         return {}
 
     r.raise_for_status()
+    print(f"{r.status_code} - ")
 
     if not r.text or not r.text.strip():
         return {}
 
     try:
+        filedata = r.json()
+        with open("testdata.json", "w", encoding="utf-8") as f:
+            json.dump(filedata, f, indent=2, ensure_ascii=False)
         return r.json()
     except ValueError:
         raise ValueError(
@@ -48,7 +52,12 @@ def check_waterstand(label: str, location_code: str):
     start = now - timedelta(days=2)
     end = now
 
-    # 1) CheckWaarnemingenAanwezig (DD-API20 format)
+    # 1) CheckWaarnemingenAanwezig (DD-API20 format) alleen kort:
+    # Expecting:
+    # {
+    #  "Succesvol": true,
+    #  "WaarnemingenAanwezig": "true"
+    # }
     check_payload = {
         "LocatieLijst": [{"Code": location_code}],
         "AquoMetadataLijst": [
@@ -64,6 +73,7 @@ def check_waterstand(label: str, location_code: str):
     }
 
     check_resp = post_json(URL_CHECK, check_payload)
+
     aanwezig = str(check_resp.get("WaarnemingenAanwezig", "false")).lower() == "true"
 
     if not aanwezig:
@@ -94,14 +104,14 @@ def check_waterstand(label: str, location_code: str):
     wlists = obs_resp.get("WaarnemingenLijst", []) or []
     if not wlists:
         print("⚠️ Check zei dat er data is, maar OphalenWaarnemingen gaf geen WaarnemingenLijst terug.")
-        print(json.dumps(obs_resp, indent=2, ensure_ascii=False)[:4000])
+        print(json.dumps(obs_resp, indent=2, ensure_ascii=False)[:100])
         return
 
     # Neem de eerste lijst, en pak de laatste waarneming (meestal gesorteerd op tijd)
-    waarn = (wlists[0].get("Waarnemingen") or [])
+    waarn = (wlists[0].get("MetingenLijst") or [])
     if not waarn:
         print("⚠️ WaarnemingenLijst aanwezig, maar leeg.")
-        print(json.dumps(wlists[0], indent=2, ensure_ascii=False)[:4000])
+        print(json.dumps(wlists[0], indent=2, ensure_ascii=False)[:100])
         return
 
     last = waarn[-1]
@@ -111,15 +121,65 @@ def check_waterstand(label: str, location_code: str):
     print(f"✅ Waterstand beschikbaar voor {label}")
     print(f"   Tijdstip : {tijd}")
     print(f"   Waarde   : {waarde}")
+    return wlists
 
+def print_data(water_data):
+    # Deze functie print de beschrikbare water data
+    print_dict={'index':{}}
+    for loc_data in water_data:
+        locatie = loc_data[0]['Locatie']['Code']
+        print_dict[locatie] = {}
+        print(f"starting measurements for {locatie}")
+
+        for meting in loc_data[0]["MetingenLijst"]:
+            timestamp = meting["Tijdstip"][:13]
+            print_dict['index'][timestamp] = {}
+            print_dict[locatie][timestamp] = meting["Meetwaarde"]["Waarde_Numeriek"]
+
+    print(print_dict)
+    return print_dict
+
+def print_table(data: dict):
+    times = data["index"].keys()
+    locations = [k for k in data.keys() if k != "index"]
+
+    # header
+    header = ["Tijd"] + locations
+    widths = [len(h) for h in header]
+
+    rows = []
+    for t in times:
+        row = [t]
+        for loc in locations:
+            val = data.get(loc, {}).get(t, "")
+            row.append("" if val == "" else f"{val:.1f}")
+        rows.append(row)
+        widths = [max(w, len(c)) for w, c in zip(widths, row)]
+
+    def fmt(row):
+        return "| " + " | ".join(c.ljust(w) for c, w in zip(row, widths)) + " |"
+
+    sep = "+-" + "-+-".join("-" * w for w in widths) + "-+"
+
+    print(sep)
+    print(fmt(header))
+    print(sep)
+    for r in rows:
+        print(fmt(r))
+    print(sep)
 
 def main():
+    waterstanden = []
+    water_data = {}
     for label, code in LOCATIONS.items():
         print("\n" + "=" * 60)
         print(f"Locatie: {label} ({code})")
         print("=" * 60)
-        check_waterstand(label, code)
+        waterstanden.append(check_waterstand(label, code))
 
+
+    printable_dict = print_data(waterstanden)
+    print_table(printable_dict)
 
 if __name__ == "__main__":
     main()
