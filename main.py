@@ -2,6 +2,8 @@
 import json
 import requests
 from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from zoneinfo import ZoneInfo
 
 BASE = "https://ddapi20-waterwebservices.rijkswaterstaat.nl"
@@ -13,9 +15,12 @@ BLUE = "\033[34m"
 RESET = "\033[0m"
 TZ = ZoneInfo("Europe/Amsterdam")
 LOCATIONS = {
-    "lobith": "lobith.bovenrijn.haven",
-    "amerongen beneden": "amerongen.beneden",
+    "Lobith, Bovenrijn, haven": "lobith.bovenrijn.haven",
+    "Amerongen beneden": "amerongen.beneden",
     "Krimpen a/d IJssel": "krimpenaandeijssel.hollandscheijssel",
+    "Culemborg": "culemborg",
+    "Driel, beneden": "driel.beneden",
+    "Pannerdense kop": "pannerdense.kop",
 }
 
 
@@ -37,9 +42,6 @@ def post_json(url: str, payload: dict) -> dict:
         return {}
 
     try:
-        filedata = r.json()
-        with open("testdata.json", "w", encoding="utf-8") as f:
-            json.dump(filedata, f, indent=2, ensure_ascii=False)
         return r.json()
     except ValueError:
         raise ValueError(
@@ -51,9 +53,10 @@ def post_json(url: str, payload: dict) -> dict:
 def check_waterstand(label: str, location_code: str):
     # Waterinfo publiek: ~28 dagen terug, ~2 dagen vooruit.
     # Voor een simpele beschikbaarheidscheck: neem laatste 2 dagen.
+
     now = datetime.now(TZ)
-    start = now - timedelta(days=2)
-    end = now
+    start = now - timedelta(days=14)
+    end   = now
 
     # 1) CheckWaarnemingenAanwezig (DD-API20 format) alleen kort:
     # Expecting:
@@ -126,55 +129,184 @@ def check_waterstand(label: str, location_code: str):
     print(f"   Waarde   : {waarde}")
     return wlists
 
+def check_watervoorspelling(label: str, location_code: str):
+    # Waterinfo publiek: ~28 dagen terug, ~2 dagen vooruit.
+    # Voor een simpele beschikbaarheidscheck: neem laatste 2 dagen.
+    now = datetime.now(TZ)
+    start = now
+    end   = now + timedelta(days=4)
+
+    # 1) CheckWaarnemingenAanwezig (DD-API20 format) alleen kort:
+    # Expecting:
+    # {
+    #  "Succesvol": true,
+    #  "WaarnemingenAanwezig": "true"
+    # }
+    check_payload = {
+        "LocatieLijst": [{"Code": location_code}],
+        "AquoMetadataLijst": [
+            {
+                "Compartiment": {"Code": "OW"},
+                "Grootheid": {"Code": "WATHTE"},
+            }
+        ],
+        "Periode": {
+            "Begindatumtijd": iso(start),
+            "Einddatumtijd": iso(end),
+        },
+    }
+
+    check_resp = post_json(URL_CHECK, check_payload)
+
+    aanwezig = str(check_resp.get("WaarnemingenAanwezig", "false")).lower() == "true"
+
+    if not aanwezig:
+        print(f"❌ Geen waterstand beschikbaar (WATHTE) voor {label} in de afgelopen 2 dagen")
+        print("   CheckWaarnemingenAanwezig response:")
+        print(json.dumps(check_resp, indent=2, ensure_ascii=False))
+        return
+
+    print(f"✅ Waterstand lijkt beschikbaar voor {label} (CheckWaarnemingenAanwezig=true). Haal laatste waarde op...")
+
+    # 2) OphalenWaarnemingen (DD-API20 format)
+    obs_payload = {
+        "Locatie": {"Code": location_code},
+        "AquoPlusWaarnemingMetadata": {
+            "AquoMetadata": {
+                "Compartiment": {"Code": "OW"},
+                "Grootheid": {"Code": "WATHTE"},
+                "ProcesType": "verwachting",
+            }
+        },
+        "Periode": {
+            "Begindatumtijd": iso(start),
+            "Einddatumtijd": iso(end),
+        },
+    }
+
+    obs_resp = post_json(URL_OBS, obs_payload)
+    with open("testdata3.json", "w", encoding="utf-8") as f:
+        json.dump(obs_resp, f, indent=2, ensure_ascii=False)
+
+    for item in obs_resp:
+        print(f"DEZZZZEEE {item}")
+    wlists = obs_resp.get("WaarnemingenLijst", []) or []
+    if not wlists:
+        print("⚠️ Check zei dat er data is, maar OphalenWaarnemingen gaf geen WaarnemingenLijst terug.")
+        print(json.dumps(obs_resp, indent=2, ensure_ascii=False)[:100])
+        return
+
+    # Neem de eerste lijst, en pak de laatste waarneming (meestal gesorteerd op tijd)
+    waarn = (wlists[0].get("MetingenLijst") or [])
+    if not waarn:
+        print("⚠️ MetingenLijst aanwezig, maar leeg.")
+        print(json.dumps(wlists[0], indent=2, ensure_ascii=False)[:100])
+        return
+
+    last = waarn[-1]
+    tijd = last.get("Datumtijd")
+    waarde = (last.get("Meetwaarde") or {}).get("Waarde_Numeriek")
+
+    print(f"✅ Waterstand beschikbaar voor {label}")
+    print(f"   Tijdstip : {tijd}")
+    print(f"   Waarde   : {waarde}")
+    return wlists
+
 def print_data(water_data):
     # Deze functie print de beschrikbare water data
     print_dict={'index':{}}
     for loc_data in water_data:
-        locatie = loc_data[0]['Locatie']['Code']
-        print_dict[locatie] = {}
+        locatie = loc_data['Locatie']['Naam'].split(" ")[0].split(",")[0]
+        #if locatie not in print_dict:
+        #    print_dict[locatie] = {}
+        print_dict.setdefault(locatie, {})
         print(f"starting measurements for {locatie}")
 
-        for meting in loc_data[0]["MetingenLijst"]:
-            timestamp = meting["Tijdstip"][:13]
-            print_dict['index'][timestamp] = {}
-            print_dict[locatie][timestamp] = meting["Meetwaarde"]["Waarde_Numeriek"]
+        if loc_data.get("MetingenLijst"):
+            for meting in loc_data["MetingenLijst"]:
+                timestamp = meting["Tijdstip"][:13]
+                print_dict['index'][timestamp] = {}
+                print_dict[locatie][timestamp] = meting["Meetwaarde"]["Waarde_Numeriek"]
 
     print(print_dict)
     return print_dict
 
 def print_table(data: dict):
-    times = data["index"].keys()
+    times = list(data["index"].keys())
     locations = [k for k in data.keys() if k != "index"]
 
-    # header
     header = ["Tijd"] + locations
-    widths = [len(h) for h in header]
 
-    rows = []
-    for t in times:
-        row = [t]
-        for loc in locations:
-            val = data.get(loc, {}).get(t, "")
-            row.append("" if val == "" else f"{val:.1f}")
-        rows.append(row)
-        widths = [max(w, len(c)) for w, c in zip(widths, row)]
+    # Bepaal breedte op basis van Tijd-kolom
+    col_width = max(len("Tijd"), max(len(t) for t in times))
+    widths = [col_width] * len(header)
+
+    def color(curr, prev, text):
+        if prev is None:
+            return text
+        if curr > prev:
+            return f"{RED}{text}{RESET}"
+        if curr < prev:
+            return f"{GREEN}{text}{RESET}"
+        return f"{BLUE}{text}{RESET}"
 
     def fmt(row):
         cells = []
         for i, (c, w) in enumerate(zip(row, widths)):
-            if i == 0:  # Tijd links
+            if i == 0:          # Tijd links
                 cells.append(c.ljust(w))
-            else:       # Getallen rechts
+            else:               # Getallen rechts
                 cells.append(c.rjust(w))
         return "| " + " | ".join(cells) + " |"
+
     sep = "+-" + "-+-".join("-" * w for w in widths) + "-+"
 
     print(sep)
     print(fmt(header))
     print(sep)
-    for r in rows:
-        print(fmt(r))
+
+    prev_values = {loc: None for loc in locations}
+
+    for t in times:
+        row = [t]
+        for loc in locations:
+            v = data.get(loc, {}).get(t)
+            if v is None:
+                row.append("")
+            else:
+                cell = f"{v:>13.1f}"
+                txt = color(v, prev_values[loc], cell)
+                row.append(txt)
+                prev_values[loc] = v
+        print(fmt(row))
+
     print(sep)
+
+def plot_waterstanden(data: dict, title="Waterstanden"):
+    now = datetime.now(TZ)
+
+    times = list(data["index"].keys())
+    x = [datetime.strptime(t, "%Y-%m-%dT%H") for t in times]
+
+    locations = [k for k in data.keys() if k != "index"]
+
+    plt.figure(figsize=(14, 10))
+    for loc in locations:
+        y = [data.get(loc, {}).get(t, None) for t in times]
+        plt.plot(x, y, marker=".", markersize=3, linewidth=1, label=loc)
+
+    plt.axhline(425.0, color="red",linestyle="--", linewidth=1)
+    plt.axvline(mdates.date2num(now), color="red", linestyle="--", linewidth=1)
+    plt.title(title)
+    plt.xlabel("Tijd")
+    plt.ylabel("Waterstand (cm)")
+    plt.xticks(rotation=45, ha="right")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("waterstanden.png", dpi=150, bbox_inches="tight")
+    plt.show()
+
 
 def main():
     waterstanden = []
@@ -183,11 +315,22 @@ def main():
         print("\n" + "=" * 60)
         print(f"Locatie: {label} ({code})")
         print("=" * 60)
-        waterstanden.append(check_waterstand(label, code))
 
+        result = check_waterstand(label, code)
+        if isinstance(result, list):
+            waterstanden.extend(result)
+
+        result = check_watervoorspelling(label, code)
+        if isinstance(result, list):
+            waterstanden.extend(result)
+
+
+    with open("waterstanden.json", "w", encoding="utf-8") as f:
+        json.dump(waterstanden, f, indent=2, ensure_ascii=False)
 
     printable_dict = print_data(waterstanden)
     print_table(printable_dict)
+    plot_waterstanden(printable_dict)
 
 if __name__ == "__main__":
     main()
