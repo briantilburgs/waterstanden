@@ -7,7 +7,10 @@ from zoneinfo import ZoneInfo
 BASE = "https://ddapi20-waterwebservices.rijkswaterstaat.nl"
 URL_CHECK = f"{BASE}/ONLINEWAARNEMINGENSERVICES/CheckWaarnemingenAanwezig"
 URL_OBS = f"{BASE}/ONLINEWAARNEMINGENSERVICES/OphalenWaarnemingen"
-
+RED = "\033[31m"
+GREEN = "\033[32m"
+BLUE = "\033[34m"
+RESET = "\033[0m"
 TZ = ZoneInfo("Europe/Amsterdam")
 LOCATIONS = {
     "lobith": "lobith.bovenrijn.haven",
@@ -157,8 +160,13 @@ def print_table(data: dict):
         widths = [max(w, len(c)) for w, c in zip(widths, row)]
 
     def fmt(row):
-        return "| " + " | ".join(c.ljust(w) for c, w in zip(row, widths)) + " |"
-
+        cells = []
+        for i, (c, w) in enumerate(zip(row, widths)):
+            if i == 0:  # Tijd links
+                cells.append(c.ljust(w))
+            else:       # Getallen rechts
+                cells.append(c.rjust(w))
+        return "| " + " | ".join(cells) + " |"
     sep = "+-" + "-+-".join("-" * w for w in widths) + "-+"
 
     print(sep)
