@@ -16,11 +16,13 @@ RESET = "\033[0m"
 TZ = ZoneInfo("Europe/Amsterdam")
 LOCATIONS = {
     "Lobith, Bovenrijn, haven": "lobith.bovenrijn.haven",
-    "Amerongen beneden": "amerongen.beneden",
-    "Krimpen a/d IJssel": "krimpenaandeijssel.hollandscheijssel",
-    "Culemborg": "culemborg",
+    "Driel, boven": "driel.boven",
     "Driel, beneden": "driel.beneden",
-    "Pannerdense kop": "pannerdense.kop",
+    "Rhenen Grebbeberg": "rhenen.grebbeberg",
+    "Amerongen boven": "amerongen.boven",
+    "Amerongen beneden": "amerongen.beneden",
+    "Culemborg": "culemborg",
+    "Krimpen a/d IJssel": "krimpenaandeijssel.hollandscheijssel",
 }
 
 
@@ -133,11 +135,11 @@ def check_waterstand(label: str, location_code: str, type_data: str, days: int):
     print(f"   Waarde   : {waarde}")
     return wlists
 
-def print_data(water_data):
-    # Deze functie print de beschrikbare water data
+def create_print_data(water_data):
+    # Deze functie converteerd de beschrikbare water data in een overzichtelijke vorm
     print_dict={'index':{}}
     for loc_data in water_data:
-        locatie = loc_data['Locatie']['Naam'].split(" ")[0].split(",")[0]
+        locatie = loc_data['Locatie']['Naam']
         print_dict.setdefault(locatie, {})
         print(f"starting measurements for {locatie}")
 
@@ -226,6 +228,7 @@ def plot_waterstanden(data: dict, title="Waterstanden"):
         plt.plot(x, y, marker=".", markersize=3, linewidth=1, label=loc)
 
     plt.axhline(425.0, color="red",linestyle="--", linewidth=1)
+    plt.axhline(1100.0, color="red",linestyle="--", linewidth=1)
     plt.axvline(mdates.date2num(now), color="red", linestyle="--", linewidth=1)
     plt.title(title)
     plt.xlabel("Tijd")
@@ -246,14 +249,14 @@ def main():
         print("=" * 60)
 
         for t in ("meting", "verwachting"):
-            r = check_waterstand(label, code, t, 14)
+            r = check_waterstand(label, code, t, 30)
             if isinstance(r, list):
                 waterstanden.extend(r)
 
     with open("waterstanden.json", "w", encoding="utf-8") as f:
         json.dump(waterstanden, f, indent=2, ensure_ascii=False)
 
-    printable_dict = print_data(waterstanden)
+    printable_dict = create_print_data(waterstanden)
     # print_table(printable_dict)
     plot_waterstanden(printable_dict)
 
