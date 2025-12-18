@@ -324,7 +324,7 @@ def main():
         print("=" * 60)
 
         for t in ("meting", "verwachting"):
-            r = check_waterstand(label, code, t, 1)
+            r = check_waterstand(label, code, t, 30)
             if isinstance(r, list):
                 waterstanden.extend(r)
 
