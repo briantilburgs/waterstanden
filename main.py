@@ -11,7 +11,10 @@ URL_CHECK = f"{BASE}/ONLINEWAARNEMINGENSERVICES/CheckWaarnemingenAanwezig"
 URL_OBS = f"{BASE}/ONLINEWAARNEMINGENSERVICES/OphalenWaarnemingen"
 RED = "\033[31m"
 GREEN = "\033[32m"
+YELLOW = "\033[33m"
 BLUE = "\033[34m"
+ORANGE = "\033[38;5;208m"
+BLACK = "\033[90m"
 RESET = "\033[0m"
 TZ = ZoneInfo("Europe/Amsterdam")
 LOCATIONS = {
@@ -19,10 +22,14 @@ LOCATIONS = {
     "Driel, boven": "driel.boven",
     "Driel, beneden": "driel.beneden",
     "Rhenen Grebbeberg": "rhenen.grebbeberg",
-    "Amerongen boven": "amerongen.boven",
-    "Amerongen beneden": "amerongen.beneden",
+    "Amerongen, boven": "amerongen.boven",
+    "Amerongen, beneden": "amerongen.beneden",
     "Culemborg": "culemborg",
     "Krimpen a/d IJssel": "krimpenaandeijssel.hollandscheijssel",
+}
+ALARMS = {
+    "Lobith, Bovenrijn, haven": {"max_level": 1100.0, "norm_level": 800.0, "alarm": "GREEN"},
+    "Amerongen, beneden": {"max_level": 425.0, "norm_level": 150.0, "alarm": "GREEN"},
 }
 
 
@@ -59,10 +66,10 @@ def check_waterstand(label: str, location_code: str, type_data: str, days: int):
     now = datetime.now(TZ)
     if type_data == "meting":
         start = now - timedelta(days=days)
-        end   = now
+        end = now
     elif type_data == "verwachting":
         start = now
-        end   = now + timedelta(days=days)
+        end = now + timedelta(days=days)
     else:
         return {}
     # 1) CheckWaarnemingenAanwezig (DD-API20 format) alleen kort:
@@ -135,9 +142,10 @@ def check_waterstand(label: str, location_code: str, type_data: str, days: int):
     print(f"   Waarde   : {waarde}")
     return wlists
 
+
 def create_print_data(water_data):
     # Deze functie converteerd de beschrikbare water data in een overzichtelijke vorm
-    print_dict={'index':{}}
+    print_dict = {'index': {}}
     for loc_data in water_data:
         locatie = loc_data['Locatie']['Naam']
         print_dict.setdefault(locatie, {})
@@ -150,6 +158,7 @@ def create_print_data(water_data):
                 print_dict[locatie][timestamp] = meting["Meetwaarde"]["Waarde_Numeriek"]
 
     return print_dict
+
 
 def print_table(data: dict):
     times = list(data["index"].keys())
@@ -173,9 +182,9 @@ def print_table(data: dict):
     def fmt(row):
         cells = []
         for i, (c, w) in enumerate(zip(row, widths)):
-            if i == 0:          # Tijd links
+            if i == 0:  # Tijd links
                 cells.append(c.ljust(w))
-            else:               # Getallen rechts
+            else:  # Getallen rechts
                 cells.append(c.rjust(w))
         return "| " + " | ".join(cells) + " |"
 
@@ -202,6 +211,7 @@ def print_table(data: dict):
 
     print(sep)
 
+
 def plot_waterstanden(data: dict, title="Waterstanden"):
     now = datetime.now(TZ)
 
@@ -222,13 +232,12 @@ def plot_waterstanden(data: dict, title="Waterstanden"):
     ax.grid(which="major", linewidth=1.2)  # dikker (00:00)
     ax.grid(which="minor", linewidth=0.4)  # dunner (6 uur)
 
-
     for loc in locations:
         y = [data.get(loc, {}).get(t, None) for t in times]
         plt.plot(x, y, marker=".", markersize=3, linewidth=1, label=loc)
 
-    plt.axhline(425.0, color="red",linestyle="--", linewidth=1)
-    plt.axhline(1100.0, color="red",linestyle="--", linewidth=1)
+    plt.axhline(425.0, color="red", linestyle="--", linewidth=1)
+    plt.axhline(1100.0, color="red", linestyle="--", linewidth=1)
     plt.axvline(mdates.date2num(now), color="red", linestyle="--", linewidth=1)
     plt.title(title)
     plt.xlabel("Tijd")
@@ -240,6 +249,72 @@ def plot_waterstanden(data: dict, title="Waterstanden"):
     plt.savefig("waterstanden.png", dpi=150, bbox_inches="tight")
     plt.show()
 
+def check_alarms(data: dict):
+    """
+
+    Args:
+        data (dict): All water data
+
+    Returns:
+
+    """
+    print(f"Lets Check Alarms")
+    alarm_on = False
+    now = datetime.now(TZ)
+    now = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+    for site in ALARMS:
+        alarm_local = "GREEN"
+        print(f"  {site}")
+        site_data = data.get(site)
+        if not isinstance(site_data, dict):
+            print(f"    ⚠️ Geen data gevonden voor alarm-locatie '{site}'.")
+            ALARMS[site]["alarm"] = alarm_local
+            continue
+        for time, hight in site_data.items():
+            # print(f"{now} <= {datetime.strptime(time, "%Y-%m-%dT%H").replace(tzinfo=TZ)}")
+            if now <= datetime.strptime(time, "%Y-%m-%dT%H").replace(tzinfo=TZ):
+                max_level = float(ALARMS[site]["max_level"])
+                norm_level = float(ALARMS[site]["norm_level"])
+                span = max_level - norm_level
+                h = float(hight)
+
+                # Multi-level warning states based on norm_level + % of (max_level - norm_level)
+                if h >= max_level:
+                    state = "BLACK"
+                elif h >= norm_level + 0.95 * span:
+                    state = "RED"
+                elif h >= norm_level + 0.75 * span:\
+                    state = "ORANGE"
+                elif h >= norm_level + 0.50 * span:
+                    state = "YELLOW"
+                else:
+                    state = "GREEN"
+
+                # Keep the worst state across times for this site
+                order = {"GREEN": 0, "YELLOW": 1, "ORANGE": 2, "RED": 3, "BLACK": 4}
+                if order[state] > order[alarm_local]:
+                    alarm_local = state
+
+                state_color = {
+                    "GREEN": GREEN,
+                    "YELLOW": YELLOW,
+                    "ORANGE": ORANGE,
+                    "RED": RED,
+                    "BLACK": BLACK,
+                }
+
+                if state == "GREEN":
+                    print(f"    {GREEN}OK{RESET} {site}: {time}: {hight}")
+                else:
+                    prefix = f"{state_color.get(state, '')}WARNING {state}{RESET}"
+                    print(
+                        f"    {prefix} {site}: at {time} {hight} "
+                        f"(norm={norm_level}, max={max_level}, span={span})"
+                    )
+                    alarm_on = True
+        ALARMS[site]["alarm"] = alarm_local
+    return alarm_on
+
 
 def main():
     waterstanden = []
@@ -249,7 +324,7 @@ def main():
         print("=" * 60)
 
         for t in ("meting", "verwachting"):
-            r = check_waterstand(label, code, t, 30)
+            r = check_waterstand(label, code, t, 1)
             if isinstance(r, list):
                 waterstanden.extend(r)
 
@@ -259,6 +334,9 @@ def main():
     printable_dict = create_print_data(waterstanden)
     # print_table(printable_dict)
     plot_waterstanden(printable_dict)
+    if check_alarms(printable_dict) is True:
+        print(f"Alarm found: {ALARMS}")
+
 
 if __name__ == "__main__":
     main()
